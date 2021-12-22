@@ -2,7 +2,7 @@
  * Creator: Naman Dixit
  * Notice: © Copyright 2018 Naman Dixit
  * SPDX-License-Identifier: 0BSD
- * Version: 813
+ * Version: 814
  */
 
 // TODO(naman): Make all these data structures handle allocation failure gracefully.
@@ -2678,6 +2678,13 @@ typedef struct {
 #   define sbCreateAlloc(alloc)               {ra_Create(cast_val(NLIB_NULL, ra(Char)*),  0,       alloc)}
 #   define sbCreateAllocSized(min_cap, alloc) {ra_Create(cast_val(NLIB_NULL, ra(Char)*),  min_cap, alloc)}
 #  endif
+
+header_function
+void sbDelete (String_Builder sb)
+{
+    raDelete(sb.str);
+    return;
+}
 
 #  define sbPrint(sb, ...)         ((sb).str = sb_Print((sb).str, __VA_ARGS__))
 //#  define sbPrintSized(sb, s, ...) ((sb).str = sb_PrintSized((sb).str, s, __VA_ARGS__))

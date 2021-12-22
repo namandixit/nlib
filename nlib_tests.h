@@ -214,12 +214,14 @@ void raUnitTest (void)
     sbPrint(stream, "Still here? %d\n", 420);
     sbPrint(stream, "GO AWAY!!!\n");
     utTest(streq(raPtr(stream.str), "Hello, World!\nStill here? 420\nGO AWAY!!!\n"));
+    sbDelete(stream);
 
     /* Char *stream2 = NLIB_NULL; */
     /* Char *string = "Naman Dixit"; */
     /* sbufPrintSized(stream2, 5, "%s", string); */
     /* printf("%s\n%s\n", stream2, string); */
     /* utTest(streq(stream2, "Naman")); */
+    /* sbDelete(stream); */
 }
 
 header_function
