@@ -2,7 +2,7 @@
  * Creator: Naman Dixit
  * Notice: © Copyright 2018 Naman Dixit
  * SPDX-License-Identifier: 0BSD
- * Version: 814
+ * Version: 816
  */
 
 // TODO(naman): Make all these data structures handle allocation failure gracefully.
@@ -449,7 +449,7 @@ Size report (Char const *format, ...)
  *
  *     If BUILD_DEBUG is defined, this causes a breakpoint – if the program is open in
  *     a debugger, that breakpoint will be caught and handled; however, if the program is not
- *     in a debugger,
+ *     in a debugger, the program will exit.
  */
 
 #  if defined(OS_WINDOWS)
@@ -478,6 +478,31 @@ void breakpoint(void) {
 
 
 # endif // @debug
+
+
+# if !defined(NLIB_EXCLUDE_ERROR)
+
+/* API ----------------------------------------
+ * Size error (Char *fmt, ...)
+ *
+ *     If BUILD_DEBUG is defined, this causes a breakpoint – if the program is open in
+ *     a debugger, that breakpoint will be caught and handled; however, if the program is not
+ *     in a debugger, the program will exit.
+ */
+
+header_function
+void error (Char const *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    reportv(format, ap);
+    va_end(ap);
+
+    breakpoint();
+}
+
+# endif // @error
+
 
 /* ==============
  * @Claim (assert)
