@@ -210,10 +210,12 @@ void raUnitTest (void)
     utTest(ra_IsNULL(buf));
 
     String_Builder stream = sbCreate();
+    utTest(sbIsEmpty(stream) == true);
     sbPrint(stream, "Hello, %s\n", "World!");
     sbPrint(stream, "Still here? %d\n", 420);
     sbPrint(stream, "GO AWAY!!!\n");
     utTest(streq(raPtr(stream.str), "Hello, World!\nStill here? 420\nGO AWAY!!!\n"));
+    utTest(sbIsEmpty(stream) == false);
     sbDelete(stream);
 
     /* Char *stream2 = NLIB_NULL; */
