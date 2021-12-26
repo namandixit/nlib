@@ -2,7 +2,7 @@
  * Creator: Naman Dixit
  * Notice: © Copyright 2018 Naman Dixit
  * SPDX-License-Identifier: 0BSD
- * Version: 821
+ * Version: 825
  */
 
 // TODO(naman): Make all these data structures handle allocation failure gracefully.
@@ -2771,6 +2771,12 @@ ra(Char) sb_Print (ra(Char) buf, const Char *fmt, ...)
 header_function
 Bool sbIsEmpty (String_Builder sb) {
     return raElemin(sb.str) == 0;
+}
+
+header_function
+Char* sbString (String_Builder sb)
+{
+    return raPtr(sb.str);
 }
 
 # endif // !defined(NLIB_EXCLUDE_STRING_BUILDER)
