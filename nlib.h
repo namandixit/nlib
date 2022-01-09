@@ -49,7 +49,10 @@
 # endif
 
 # if defined(_WIN32)
-#  define OS_WINDOWS
+#  if !defined(OS_WINDOWS) // Shlwapi.h defines it own OS_WINDOWS to 0. Thankfully, we only care
+                           // whether it is defined or now.
+#   define OS_WINDOWS
+#  endif
 # elif defined(__linux__)
 #  define OS_LINUX
 # else
