@@ -2,7 +2,7 @@
  * Creator: Naman Dixit
  * Notice: © Copyright 2018 Naman Dixit
  * SPDX-License-Identifier: 0BSD
- * Version: 825
+ * Version: 826
  */
 
 // TODO(naman): Make all these data structures handle allocation failure gracefully.
@@ -332,6 +332,17 @@ typedef char                 Char;
 
 # define internal_function static
 # define header_function   static inline
+
+# if defined(COMPILER_MSVC) || defined(COMPILER_CLANG_WITH_MSVC)
+#  if defined(BUILD_DLL)
+#   define exported_function __declspec(dllexport)
+#  else
+#   define exported_function __declspec(dllimport)
+#  endif
+# elif defined(COMPILER_GCC) || defined(COMPILER_CL)
+#  define exported_function __attribute__((visibility("default")))
+# endif
+
 
 # if defined(LANG_C)
 #  define NLIB_NULL NULL
