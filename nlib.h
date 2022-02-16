@@ -2,7 +2,7 @@
  * Creator: Naman Dixit
  * Notice: © Copyright 2018 Naman Dixit
  * SPDX-License-Identifier: 0BSD
- * Version: 826
+ * Version: 829
  */
 
 // TODO(naman): Make all these data structures handle allocation failure gracefully.
@@ -2969,19 +2969,28 @@ typedef struct Intern {
         ra(Size) indices;
         ra(U8) secondary_hashes;
     } lists[256];
+    Memory_Allocator allocator;
 } Intern;
 
 header_function
-Intern internCreate (void)
+Intern internCreateAlloc (Memory_Allocator allocator)
 {
     Intern it = NLIB_ZERO_INIT_LIST;
 
     for (Size i = 0; i < elemin(it.lists); i++) {
-        it.lists[i].indices = raCreate(it.lists[i].indices);
-        it.lists[i].secondary_hashes = raCreate(it.lists[i].secondary_hashes);
+        it.lists[i].indices = raCreateAlloc(it.lists[i].indices, allocator);
+        it.lists[i].secondary_hashes = raCreateAlloc(it.lists[i].secondary_hashes, allocator);
     }
 
+    it.allocator = allocator;
+
     return it;
+}
+
+header_function
+Intern internCreate (void)
+{
+    return internCreateAlloc(memCRTGet());
 }
 
 
@@ -3095,13 +3104,19 @@ INTERN_EQUALITY(internStringEquality) {
 }
 
 header_function
-Intern_String internStringCreate (void)
+Intern_String internStringCreateAlloc (Memory_Allocator allocator)
 {
     Intern_String its = NLIB_ZERO_INIT_LIST;
-    its.intern = internCreate();
-    its.strings = raCreate(its.strings);
+    its.intern = internCreateAlloc(allocator);
+    its.strings = raCreateAlloc(its.strings, allocator);
 
     return its;
+}
+
+header_function
+Intern_String internStringCreate (void)
+{
+    return internStringCreateAlloc(memCRTGet());
 }
 
 header_function
@@ -3119,7 +3134,7 @@ Char *internString (Intern_String *is, Char *str)
     } else {
         Size index_new = raElemin(is->strings);
 
-        ra(Char) str_new = raCreate(str_new);
+        ra(Char) str_new = raCreateAlloc(str_new, is->intern.allocator);
         for (Char *s = str; s[0] != '\0'; s++) {
             raAdd(str_new, s[0]);
         }
@@ -3170,13 +3185,20 @@ typedef struct Intern_Integer {
 } Intern_Integer;
 
 header_function
-Intern_Integer internIntegerCreate (void)
+Intern_Integer internIntegerCreateAlloc (Memory_Allocator allocator)
 {
     Intern_Integer iti = NLIB_ZERO_INIT_LIST;
-    iti.intern = internCreate();
-    iti.integers = raCreate(iti.integers);
+    iti.intern = internCreateAlloc(allocator);
+    iti.integers = raCreateAlloc(iti.integers, allocator);
 
     return iti;
+}
+
+
+header_function
+Intern_Integer internIntegerCreate (void)
+{
+    return internIntegerCreateAlloc(memCRTGet());
 }
 
 header_function
