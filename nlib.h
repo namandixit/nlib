@@ -2,7 +2,7 @@
  * Creator: Naman Dixit
  * Notice: © Copyright 2018 Naman Dixit
  * SPDX-License-Identifier: 0BSD
- * Version: 829
+ * Version: 830
  */
 
 // TODO(naman): Make all these data structures handle allocation failure gracefully.
@@ -532,8 +532,10 @@ void error (Char const *format, ...)
 # if !defined(NLIB_EXCLUDE_CLAIM)
 
 #  if defined(BUILD_DEBUG)
-#   define claim(cond)    claim_(cond,  #cond, __FILE__, __LINE__)
-#   define claim_err(str) claim_(false, str,   __FILE__, __LINE__)
+#   define claim(cond)          claim_((cond), #cond, __FILE__, __LINE__)
+#   define claim_str(cond, str) claim_((cond), (str), __FILE__, __LINE__)
+#   define claim_err(str)       claim_(false,  (str), __FILE__, __LINE__)
+
 header_function
 void claim_ (Bool cond,
              Char const *cond_str,

@@ -8,6 +8,13 @@
 # define NLIB_TESTS
 # include "nlib.h"
 
+header_function
+void claimTest (void)
+{
+    claim(true);
+    claim_str(true, "hello world");
+}
+
 # define CHECK_END(str) do { utTest(streq(buf, (str)) && (cast_val(ret, Uint) == strlen(str))); memset(buf, 0, elemin(buf)); } while(0)
 # define SPRINTF(b, ...) printString(b, 1024, __VA_ARGS__)
 # define SNPRINTF(b, s, ...) cast_val(printString(b, 1024, __VA_ARGS__), Sint)
