@@ -2,7 +2,7 @@
  * Creator: Naman Dixit
  * Notice: © Copyright 2018 Naman Dixit
  * SPDX-License-Identifier: 0BSD
- * Version: 830
+ * Version: 889
  */
 
 // TODO(naman): Make all these data structures handle allocation failure gracefully.
@@ -159,6 +159,33 @@
 #   error Can not determine endianness, unknown environment
 # endif
 
+/* Less noisy pragmas */
+
+# if defined(COMPILER_CLANG)
+#  define pragma_msvc(P)
+#  define pragma_clang(P) _Pragma(P)
+#  define pragma_gcc(P)
+# elif defined(COMPILER_GCC)
+#  define pragma_msvc(P)
+#  define pragma_clang(P)
+#  define pragma_gcc(P) _Pragma(P)
+# elif defined(COMPILER_MSVC)
+#  define pragma_msvc(P) _Pragma(P)
+#  define pragma_clang(P)
+#  define pragma_gcc(P)
+# endif
+
+/* Mandatory Defines ----------------------------------------------------- */
+
+#if defined(OS_WINDOWS)
+pragma_clang("clang diagnostic push")
+pragma_clang("clang diagnostic ignored \"-Wreserved-macro-identifier\"")
+#define UNICODE
+#define _UNICODE
+pragma_clang("clang diagnostic push")
+#endif
+
+
 /* Standard C Headers ----------------------------------------------------- */
 
 // NOTE(naman): Define NLIB_NOLIBC_WINDOWS to prevent the inclusion of libc functions.
@@ -172,7 +199,8 @@
 # include <inttypes.h>
 # include <limits.h>
 # include <stdarg.h>
-// NOTE(naman): Including stdnoreturn.h here causes issues on Windows Clang,
+# include <uchar.h>
+// FIXME(naman): Including stdnoreturn.h here causes issues on Windows Clang,
 // just use _Noreturn for now.
 //# include <stdnoreturn.h>
 # include <float.h>
@@ -301,7 +329,11 @@ typedef U32                  B32;
 typedef U64                  B64;
 
 typedef unsigned char        Byte;
+
 typedef char                 Char;
+typedef unsigned char        C8; // FIXME(naman): Change to char8_t with C23
+typedef char16_t             C16;
+typedef char32_t             C32;
 
 
 /* ========================
@@ -391,72 +423,372 @@ typedef char                 Char;
             break;                                                      \
         } else gensym_line(jump_to_else):
 
+
 /* ==================
- * @Report
+ * @CString
  */
 
-/* API ----------------------------------------
- * Size report (Char *fmt, ...)
- * Size reportv (Char *fmt, va_list ap)
- *   Output text on debugging channel
- *     fmt: String with print-compatible conversion specifications
- *     Returns the count of characters printed (excluding the terminating null)
- *
- *     On Windows, if a debugger is attached, it prints the formatted string to the
- *     debugger output; else, in every other circumstance, it prints to the stderr.
- */
+# if !defined(NLIB_EXCLUDE_CSTRING)
 
-# if !defined(NLIB_EXCLUDE_REPORT)
-
-// Print interface partially predeclared
-header_function Size errv (Char const *format, va_list ap);
-header_function Size printDebugOutputV (Char const *format, va_list ap);
-
-#  if defined(OS_WINDOWS)
-// NOTE(naman): In non-debug mode, redirect stderr to a log file, etc. using SetStdHandle:
-// social.msdn.microsoft.com/Forums/vstudio/en-US/a111b4c6-c491-4586-8fcb-2ad67bfbbae8/is-setstdhandlestdoutputhandle-broken-under-windows-7-
-// stackoverflow.com/q/58807775
+#  if defined(NLIB_NOLIBC)
 header_function
-Size reportv (Char const *format, va_list ap)
+Sint strcmp (const Char *s1, const Char *s2)
 {
-    Size result;
-    if (IsDebuggerPresent()) {
-        result = printDebugOutputV(format, ap);
-    } else {
-        result = errv(format, ap);
+    while(s1[0]) {
+        if (s1[0] != s2[0]) break;
+        s1++;
+        s2++;
+    }
+
+    return s1[0] - s2[0];
+}
+
+header_function
+Sint strncmp (const Char *s1, const Char *s2, Size count)
+{
+    Sint result = 0;
+
+    for (Size i = 0; i < count; i++)
+    {
+        if (s1[i] != s2[i]) {
+            result = (s1[i] < s2[i]) ? -1 : 1;
+            break;
+        }
     }
 
     return result;
 }
-#  elif defined(OS_LINUX)
-// NOTE(naman): In non-debug mode, redirect stderr to a log file, etc. using freopen(2)
-header_function
-Size reportv (Char const *format, va_list ap)
-{
-    Size result = errv(format, ap);
-    return result;
-}
-#  endif // !windows && !linux
 
 header_function
-Size report (Char const *format, ...)
+Size strlen (const Char *s)
 {
-    va_list ap;
+    Size len = 0;
 
-    va_start(ap, format);
-    Size result = reportv(format, ap);
-    va_end(ap);
+    for (Size i = 0; s[i] != '\0'; i++) {
+        len++;
+    }
 
+    len++;
+
+    return len;
+}
+#  endif
+
+header_function
+Bool streq (const Char *str1, const Char *str2)
+{
+    Bool result = (strcmp(str1, str2) == 0);
     return result;
 }
 
-# endif // @report
+header_function
+Bool strneq (const Char *str1, const Char *str2, Size count)
+{
+    Bool result = (strncmp(str1, str2, count) == 0);
+    return result;
+}
 
-/* ====================
- * @Debug
+header_function
+Size strprefix (Char *str, Char *pre)
+{
+    Size lenpre = strlen(pre);
+    Size lenstr = strlen(str);
+
+    if (lenstr < lenpre) {
+        return 0;
+    } else {
+        if (strneq(pre, str, lenpre)) {
+            return lenpre;
+        } else {
+            return 0;
+        }
+    }
+}
+
+header_function
+Size strsuffix (Char *str, Char *suf)
+{
+    Size lensuf = strlen(suf);
+    Size lenstr = strlen(str);
+
+    if (lenstr < lensuf) {
+        return 0;
+    } else {
+        if (strneq(suf, str + (lenstr - lensuf), lensuf)) {
+            return lensuf;
+        } else {
+            return 0;
+        }
+    }
+}
+
+# endif // NLIB_EXCLUDE_CSTRING
+
+
+/* ===============
+ * @Memory
  */
 
-# if !defined(NLIB_EXCLUDE_DEBUG)
+# if !defined(NLIB_EXCLUDE_MEMORY)
+
+#  define MEM_MAX_ALIGN_MINUS_ONE (alignof(max_align_t) - 1u)
+#  define memAlignUp(p) (((p) + MEM_MAX_ALIGN_MINUS_ONE) & (~ MEM_MAX_ALIGN_MINUS_ONE))
+#  define memAlignDown(p) (memAlignUp((p) - MEM_MAX_ALIGN_MINUS_ONE))
+
+// TODO(naman): Should we add some sample allocators too? Or should they always be applications' concern?
+
+typedef enum Memory_Allocator_Mode {
+    Memory_ALLOCATE,
+    Memory_REALLOCATE,
+    Memory_DEALLOCATE,
+    Memory_DEALLOCATE_ALL,
+} Memory_Allocator_Mode;
+
+#  define MEMORY_ALLOCATOR_FUNCTION(allocator)          \
+    void* allocator (Memory_Allocator_Mode mode,        \
+                     Size old_size,                     \
+                     Size new_size,                     \
+                     void* old_ptr,                     \
+                     void *userdata)
+
+typedef MEMORY_ALLOCATOR_FUNCTION(Memory_Allocator_Function);
+
+typedef struct Memory_Allocator {
+    Memory_Allocator_Function *function;
+    void *userdata;
+} Memory_Allocator;
+
+#  define memAlloc(m, ns)          ((m).function(Memory_ALLOCATE,   0,  ns, NLIB_NULL, (m).userdata))
+#  define memRealloc(m, p, ns, os) ((m).function(Memory_REALLOCATE, os, ns, p,         (m).userdata))
+#  define memDealloc(m, p, os)     ((m).function(Memory_DEALLOCATE, os, 0,  p,         (m).userdata))
+
+
+#  if defined(OS_WINDOWS)
+
+global_variable HANDLE GLOBAL_win32_process_heap = NLIB_NULL;
+
+header_function
+MEMORY_ALLOCATOR_FUNCTION(memHeap)
+{
+    unused_variable(old_size);
+    unused_variable(userdata);
+
+    if (GLOBAL_win32_process_heap == NLIB_NULL) GLOBAL_win32_process_heap = GetProcessHeap();
+
+    switch (mode) {
+        case Memory_ALLOCATE: {
+            void *memory = HeapAlloc(GLOBAL_win32_process_heap, 0, new_size);
+            return memory;
+        } break;
+
+        case Memory_REALLOCATE: {
+            void *memory = HeapReAlloc(GLOBAL_win32_process_heap, 0, old_ptr, new_size);
+            return memory;
+        } break;
+
+        case Memory_DEALLOCATE: {
+            HeapFree(GLOBAL_win32_process_heap, 0, old_ptr);
+            return NLIB_NULL;
+        } break;
+
+        case Memory_DEALLOCATE_ALL: {
+            return NLIB_NULL;
+        } break;
+    }
+
+    return NLIB_NULL;
+}
+
+#  elif defined(OS_LINUX)
+
+header_function
+MEMORY_ALLOCATOR_FUNCTION(memHeap)
+{
+    unused_variable(old_size);
+    unused_variable(userdata);
+
+    switch (mode) {
+        case Memory_ALLOCATE: {
+            void *memory = malloc(new_size);
+            return memory;
+        } break;
+
+        case Memory_REALLOCATE: {
+            void *memory = realloc(old_ptr, new_size);
+            return memory;
+        } break;
+
+        case Memory_DEALLOCATE: {
+            free(old_ptr);
+            return NLIB_NULL;
+        } break;
+
+        case Memory_DEALLOCATE_ALL: {
+            return NLIB_NULL;
+        } break;
+    }
+}
+
+#  endif // memHeap (OS-defined)
+
+header_function
+Memory_Allocator memHeapGet (void)
+{
+    Memory_Allocator allocator;
+    allocator.function = &memHeap;
+    allocator.userdata = NLIB_NULL;
+
+    return allocator;
+}
+
+#  define memHeapAlloc(size)        memHeap(Memory_ALLOCATE,   0, size, NLIB_NULL, NLIB_NULL)
+#  define memHeapRealloc(ptr, size) memHeap(Memory_REALLOCATE, 0, size, ptr,  NLIB_NULL)
+#  define memHeapDealloc(ptr)       memHeap(Memory_DEALLOCATE, 0, 0,    ptr,  NLIB_NULL)
+
+# endif // @memory
+
+
+/* ==============
+ * @Console Output
+ */
+
+#  if !defined(NLIB_CONSOLE_OUTPUT_ALLOCATOR)
+#   if defined(NLIB_ALLOCATOR)
+#    define NLIB_CONSOLE_OUTPUT_ALLOCATOR NLIB_ALLOCATOR
+#   elif defined(NLIB_NOLIBC)
+#    error "nlib: Unicode: NLIB_CONSOLE_OUTPUT_ALLOCATOR required with nolibc"
+#   else
+#    define NLIB_CONSOLE_OUTPUT_ALLOCATOR memHeapGet()
+#   endif
+#  endif
+
+typedef enum {
+    Print_Console_Stream_STDOUT,
+    Print_Console_Stream_STDERR,
+} Print_Console_Stream;
+
+#  if defined(OS_WINDOWS)
+
+global_variable HANDLE GLOBAL_win32_stdout_handle = NLIB_NULL;
+global_variable HANDLE GLOBAL_win32_stderr_handle = NLIB_NULL;
+
+header_function
+Size print_Console (Print_Console_Stream stream, Char const * const cstr)
+{
+    if (GLOBAL_win32_stdout_handle == NLIB_NULL) GLOBAL_win32_stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (GLOBAL_win32_stderr_handle == NLIB_NULL) GLOBAL_win32_stderr_handle = GetStdHandle(STD_ERROR_HANDLE);
+
+    HANDLE out_stream = NLIB_NULL;
+    switch (stream) {
+        case Print_Console_Stream_STDOUT: {
+            out_stream = GLOBAL_win32_stdout_handle;
+        } break;
+        case Print_Console_Stream_STDERR: {
+            out_stream = GLOBAL_win32_stderr_handle;
+        } break;
+    }
+
+    DWORD written = 0;
+    Size len = strlen(cstr);
+    WriteFile(out_stream, cstr, cast_val(len, DWORD), &written, NLIB_NULL);
+
+    return len;
+}
+
+header_function
+Size printOut (Char const * const cstr)
+{
+
+    Size result = print_Console(Print_Console_Stream_STDOUT, cstr);
+    return result;
+}
+
+header_function
+Size printDebug (Char const *cstr)
+{
+    int wcstr_length = MultiByteToWideChar(CP_UTF8, 0, cstr, -1, NLIB_NULL, 0);
+    DWORD wcstr_size = cast_val(wcstr_length, DWORD) * sizeof(wchar_t);
+    LPWSTR wcstr = cast_val(memAlloc(NLIB_CONSOLE_OUTPUT_ALLOCATOR, wcstr_size), LPWSTR);
+    MultiByteToWideChar(CP_UTF8, 0, cstr, -1, wcstr, wcstr_length);
+
+    OutputDebugStringW(wcstr);
+
+    memDealloc(NLIB_CONSOLE_OUTPUT_ALLOCATOR, wcstr, wcstr_size);
+
+    return cast_val(wcstr_length, Size);
+}
+
+header_function
+Size printErr (Char const * const cstr)
+{
+    Size result = 0;
+    if (IsDebuggerPresent()) {
+        result = printDebug(cstr);
+    } else {
+        result = print_Console(Print_Console_Stream_STDERR, cstr);
+    }
+
+    return result;
+}
+
+#  elif defined(OS_LINUX)
+
+header_function
+Size printOut (Char const * const cstr)
+{
+    Size result = fputs(cstr, stdout);
+    return cast_val(result, Size);
+}
+
+header_function
+Size printErr (Char const * const cstr)
+{
+    Size result = fputs(cstr, stderr);
+    return cast_val(result, Size);
+}
+
+#  endif
+
+header_function
+Char* print_Number (U64 number, Char string[20])
+{
+    U64 num = number;
+    Char *str = string + 19;
+    Size len = 0;
+
+    do {
+        str--;
+        *str = cast_val(num % 10, Char) + '0';
+        num /= 10;
+        len++;
+    } while (num != 0);
+
+    return str;
+}
+
+header_function
+Size printOutNum (U64 num)
+{
+    Char string[20] = NLIB_ZERO_INIT_LIST;
+    Char *str = print_Number(num, string);
+    Size result = printOut(str);
+    return result;
+}
+
+header_function
+Size printErrNum (U64 num)
+{
+    Char string[20] = NLIB_ZERO_INIT_LIST;
+    Char *str = print_Number(num, string);
+    Size result = printErr(str);
+    return result;
+}
+
+/* ====================
+ * @Quit
+ */
+
+# if !defined(NLIB_EXCLUDE_QUIT)
 
 /* API ----------------------------------------
  * Size breakpoint (Char *fmt, ...)
@@ -485,45 +817,13 @@ Size report (Char const *format, ...)
 #  else // !BUILD_DEBUG
 header_function
 void breakpoint(void) {
-    report("Fired breakpoint in release code, quitting...\n");
+    printErr("Fired breakpoint in release code, quitting...\n");
     quit();
 }
-#  endif // !debug && !!debug
+#  endif // !build_debug
 
 
-# endif // @debug
-
-
-# if !defined(NLIB_EXCLUDE_ERROR)
-
-/* API ----------------------------------------
- * Size error (Char *fmt, ...)
- *
- *     If BUILD_DEBUG is defined, this causes a breakpoint – if the program is open in
- *     a debugger, that breakpoint will be caught and handled; however, if the program is not
- *     in a debugger, the program will exit.
- */
-
-header_function
-void errorv (Char const *format, va_list ap)
-{
-    reportv(format, ap);
-    breakpoint();
-}
-
-header_function
-void error (Char const *format, ...)
-{
-    va_list ap;
-    va_start(ap, format);
-    errorv(format, ap);
-    va_end(ap);
-
-    breakpoint();
-}
-
-# endif // @error
-
+# endif // @quit
 
 /* ==============
  * @Claim (assert)
@@ -533,8 +833,6 @@ void error (Char const *format, ...)
 
 #  if defined(BUILD_DEBUG)
 #   define claim(cond)          claim_((cond), #cond, __FILE__, __LINE__)
-#   define claim_str(cond, str) claim_((cond), (str), __FILE__, __LINE__)
-#   define claim_err(str)       claim_(false,  (str), __FILE__, __LINE__)
 
 header_function
 void claim_ (Bool cond,
@@ -542,8 +840,13 @@ void claim_ (Bool cond,
              Char const *filename, U32 line_num)
 {
     if (!cond) {
-        report("Claim \"%s\" Failed in %s:%u\n\n",
-               cond_str, filename, line_num);
+        printErr("Claim \"");
+        printErr(cond_str);
+        printErr("\" Failed in ");
+        printErr(filename);
+        printErr(":");
+        printErrNum(line_num);
+        printErr("\n\n");
 
         breakpoint();
     }
@@ -554,1324 +857,116 @@ void claim_ (Bool cond,
 
 # endif // @claim
 
-/* ===============
- * @Memory
- */
-
-# if !defined(NLIB_EXCLUDE_MEMORY)
-
-#  define MEM_MAX_ALIGN_MINUS_ONE (alignof(max_align_t) - 1u)
-#  define memAlignUp(p) (((p) + MEM_MAX_ALIGN_MINUS_ONE) & (~ MEM_MAX_ALIGN_MINUS_ONE))
-#  define memAlignDown(p) (memAlignUp((p) - MEM_MAX_ALIGN_MINUS_ONE))
-
-// TODO(naman): Should we add some sample allocators too? Or should they always be applications' concern?
-
-typedef enum Memory_Allocator_Mode {
-    Memory_NONE,
-    Memory_ALLOCATE,
-    Memory_REALLOCATE,
-    Memory_DEALLOCATE,
-    Memory_DEALLOCATE_ALL,
-} Memory_Allocator_Mode;
-
-#  define MEMORY_ALLOCATOR_FUNCTION(allocator)          \
-    void* allocator (Memory_Allocator_Mode mode,        \
-                     Size old_size,                     \
-                     Size new_size,                     \
-                     void* old_ptr,                     \
-                     void *userdata)
-
-#  define memAlloc(m, ns)          ((m).function(Memory_ALLOCATE,   0,  ns, NLIB_NULL, (m).userdata))
-#  define memRealloc(m, p, ns, os) ((m).function(Memory_REALLOCATE, os, ns, p,         (m).userdata))
-#  define memDealloc(m, p, os)     ((m).function(Memory_DEALLOCATE, os, 0,  p,         (m).userdata))
-
-typedef MEMORY_ALLOCATOR_FUNCTION(Memory_Allocator_Function);
-
-typedef struct Memory_Allocator {
-    Memory_Allocator_Function *function;
-    void *userdata;
-} Memory_Allocator;
-
-header_function
-MEMORY_ALLOCATOR_FUNCTION(memCRT)
-{
-    unused_variable(old_size);
-    unused_variable(userdata);
-
-    switch (mode) {
-        case Memory_ALLOCATE: {
-            void *memory = malloc(new_size);
-            return memory;
-        } break;
-
-        case Memory_REALLOCATE: {
-            void *memory = realloc(old_ptr, new_size);
-            return memory;
-        } break;
-
-        case Memory_DEALLOCATE: {
-            free(old_ptr);
-            return NLIB_NULL;
-        } break;
-
-        case Memory_DEALLOCATE_ALL:
-        case Memory_NONE: {
-            claim_err("Control shouldn't reach here");
-            return NLIB_NULL;
-        } break;
-    }
-
-    claim_err("Control shouldn't reach here");
-    return NLIB_NULL;
-}
-
-header_function
-Memory_Allocator memCRTGet (void)
-{
-    Memory_Allocator allocator;
-    allocator.function = &memCRT;
-    allocator.userdata = NLIB_NULL;
-
-    return allocator;
-}
-
-#  define memCRTAlloc(size)        memCRT(Memory_ALLOCATE,   0, size, NULL, NULL)
-#  define memCRTRealloc(ptr, size) memCRT(Memory_REALLOCATE, 0, size, ptr,  NULL)
-#  define memCRTDealloc(ptr)       memCRT(Memory_DEALLOCATE, 0, 0,    ptr,  NULL)
-
-# endif // @memory
-
-/* =======================
- * @Unicode
- */
-# if !defined(NLIB_EXCLUDE_UNICODE)
-
-#  if !defined(NLIB_UNICODE_ALLOCATOR)
-#   if defined(NLIB_ALLOCATOR)
-#    define NLIB_UNICODE_ALLOCATOR NLIB_ALLOCATOR
-#   elif defined(NLIB_NOLIBC)
-#    error "nlib: Unicode: NLIB_UNICODE_ALLOCATOR required with nolibc"
-#   else
-#    define NLIB_UNICODE_ALLOCATOR memCRTGet()
-#   endif
-#  endif
-
-header_function
-B64 unicodeCodepointFromUTF16Surrogate (U16 surrogate, U16 *prev_surrogate, U32 *codepoint)
-{
-    U16 utf16_hi_surrogate_start = 0xD800;
-    U16 utf16_lo_surrogate_start = 0xDC00;
-    U16 utf16_surrogate_end = 0xDFFF;
-
-    if ((surrogate >= utf16_hi_surrogate_start) &&
-        (surrogate < utf16_lo_surrogate_start)) {
-        *prev_surrogate = surrogate;
-
-        return false;
-    } else {
-        if ((surrogate >= utf16_lo_surrogate_start) &&
-            (surrogate <= utf16_surrogate_end)) {
-            U16 low_surrogate = surrogate;
-            // NOTE(naman): In this line, the numbers get promoted from U16 to S32,
-            // so storing them in a U32 results in a inmpicit sign conversion.
-            // That is why we are casting manually.
-            *codepoint = cast_val(((*prev_surrogate - utf16_hi_surrogate_start) << 10U), U32);
-            *codepoint |= (low_surrogate - utf16_lo_surrogate_start);
-            *codepoint += 0x10000;
-
-            *prev_surrogate = 0;
-        } else {
-            *codepoint = surrogate;
-        }
-
-        return true;
-    }
-}
-
-// FIXME(naman): Change this to take buffer_size as input, similar to printStringVarArg
-// Also, return number of bytes excluding the null byte
-header_function
-Size unicodeUTF8FromUTF32 (U32 *codepoints, Size codepoint_count, Char *buffer)
-{
-    if (buffer == NLIB_NULL) {
-        Size length = 1; // NOTE(naman): We need one byte for the NUL byte.
-
-        for (Size i = 0; i < codepoint_count; i++) {
-            if (codepoints[i] <= 0x7F) {
-                length += 1;
-            } else if (codepoints[i] <= 0x7FF) {
-                length += 2;
-            } else if (codepoints[i] <= 0xFFFF) {
-                length += 3;
-            } else if (codepoints[i] <= 0x10FFFF) {
-                length += 4;
-            }
-        }
-
-        return length;
-    } else {
-        Size length = 1; // NOTE(naman): We need one byte for the NUL byte.
-
-        for (Size i = 0; i < codepoint_count; i++) {
-            if (codepoints[i] <= 0x7F) {
-                buffer[0] = cast_val(codepoints[i], Char);
-                buffer += 1;
-                length += 1;
-            } else if (codepoints[i] <= 0x7FF) {
-                buffer[0] = cast_val((0xC0 | (codepoints[i] >> 6)), Char);            /* 110xxxxx */
-                buffer[1] = cast_val((0x80 | (codepoints[i] & 0x3F)), Char);          /* 10xxxxxx */
-                buffer += 2;
-                length += 2;
-            } else if (codepoints[i] <= 0xFFFF) {
-                buffer[0] = cast_val((0xE0 | (codepoints[i] >> 12)), Char);           /* 1110xxxx */
-                buffer[1] = cast_val((0x80 | ((codepoints[i] >> 6) & 0x3F)), Char);   /* 10xxxxxx */
-                buffer[2] = cast_val((0x80 | (codepoints[i] & 0x3F)), Char);          /* 10xxxxxx */
-                buffer += 3;
-                length += 3;
-            } else if (codepoints[i] <= 0x10FFFF) {
-                buffer[0] = cast_val((0xF0 | (codepoints[i] >> 18)), Char);           /* 11110xxx */
-                buffer[1] = cast_val((0x80 | ((codepoints[i] >> 12) & 0x3F)), Char);  /* 10xxxxxx */
-                buffer[2] = cast_val((0x80 | ((codepoints[i] >> 6) & 0x3F)), Char);   /* 10xxxxxx */
-                buffer[3] = cast_val((0x80 | (codepoints[i] & 0x3F)), Char);          /* 10xxxxxx */
-                buffer += 4;
-                length += 4;
-            }
-        }
-
-        buffer[0] = '\0';
-
-        return length;
-    }
-}
-
-#  if defined(OS_WINDOWS)
-
-header_function
-LPWSTR unicodeWin32UTF16FromUTF8 (Char *utf8, Size *utf16_size)
-{
-    int wcstr_length = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NLIB_NULL, 0);
-    DWORD wcstr_size = cast_val(wcstr_length, DWORD) * sizeof(wchar_t);
-    LPWSTR wcstr = cast_val(memAlloc(NLIB_UNICODE_ALLOCATOR, wcstr_size), LPWSTR);
-    MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wcstr, wcstr_length);
-
-    int normalized_length = NormalizeString(NormalizationC,
-                                            wcstr, -1,
-                                            NLIB_NULL, 0);
-    Size normalized_size = cast_val(normalized_length, Size) * sizeof(wchar_t);
-    LPWSTR norm = cast_val(memAlloc(NLIB_UNICODE_ALLOCATOR, normalized_size), LPWSTR);
-    NormalizeString(NormalizationC, wcstr, -1, norm, normalized_length);
-    *utf16_size = normalized_size;
-
-    memDealloc(NLIB_UNICODE_ALLOCATOR, wcstr, wcstr_size);
-
-    return norm;
-}
-
-header_function
-void unicodeWin32UTF16Dealloc (LPWSTR utf16, Size utf16_size)
-{
-    memDealloc(NLIB_UNICODE_ALLOCATOR, utf16, utf16_size);
-}
-
-#  endif // OS_WINDOWS
-
-# endif // @unicode
-
-/* =======================
- * @Printing
- */
-
-# if !defined(NLIB_EXCLUDE_PRINT)
-
-// FIXME(naman): Properly document the behaviour of `precision` and `field_width` after the
-// big switch statement (when we set it to zeros_head_tail and then subtract it, etc.)
-
-#  if !defined(NLIB_PRINT_ALLOCATOR)
-#   if defined(NLIB_ALLOCATOR)
-#    define NLIB_PRINT_ALLOCATOR NLIB_ALLOCATOR
-#   elif defined(NLIB_NOLIBC)
-#    error "nlib: Print: NLIB_PRINT_ALLOCATOR required with nolibc"
-#   else
-#    define NLIB_PRINT_ALLOCATOR memCRTGet()
-#   endif
-#  endif
-
-// FIXME(naman): Float support has been removed. Understand the float printing code from
-// either STB, Dragon4, Grisu3, Ryu, Schubfach or Dragonbox (github.com/abolz/Drachennest),
-// then add it again by implementing any of the above from scratch.
-#  define NLIB_PRINT_NO_FLOAT
-
-typedef enum Print_Flags {
-    Print_Flags_LEFT_JUSTIFIED     = 1u << 0,
-    Print_Flags_ALTERNATE_FORM     = 1u << 1,
-    Print_Flags_LEADING_PLUS       = 1u << 2,
-    Print_Flags_LEADING_SPACE      = 1u << 3,
-    Print_Flags_LEADING_ZERO       = 1u << 4,
-    Print_Flags_INT8               = 1u << 5,
-    Print_Flags_INT16              = 1u << 6,
-    Print_Flags_INT64              = 1u << 7,
-    Print_Flags_NEGATIVE           = 1u << 8,
-    Print_Flags_FLOAT_FIXED        = 1u << 9,
-    Print_Flags_FLOAT_EXP          = 1u << 10,
-    Print_Flags_FLOAT_HEX          = 1u << 11,
-} Print_Flags;
-
-// FIXME(naman): This needs to change to either yield or call a callback every n characters,
-// so that functions using this don't have to call it twice (once to get size, then to
-// get the actual characters) in cases when the buffer is too small the first time.
-// FIXME(naman): Replace memcpy, etc. with loops so that atleast some of the characters
-// can get copied if the buffer is too small. Once this is done, uncomment sbPrintSized()
-// TODO(naman): Add the following features:
-//                  * Comma in numbers
-//                    + Indian style  (`)
-//                    + Western style (')
-//                  * Unit suffix
-//                    + SI  (1 K = 1000) (:)
-//                    + IEC (1 K = 1024) (;)
-header_function
-Size printStringVarArg (Char *buffer, Size buffer_size, Char const *format, va_list va)
-{
-    Char const *fmt = format;
-    Char *buf = buffer;
-    Size needed_size = 0;
-    Bool resume_output = true;
-    if (buffer == NLIB_NULL) resume_output = false;
-
-#  define IS_OUTPUT_RESUMABLE(arg_space)                                \
-    do {                                                                \
-        Char *buf_extra  = buf + cast_val(arg_space, Uptr);             \
-        Char *buffer_end = buffer + buffer_size;                        \
-        if (resume_output && (cast_mem(buf_extra, Uptr) >= cast_mem(buffer_end, Uptr))) { \
-            resume_output = false;                                      \
-        }                                                               \
-    } while (0)
-
-    while (true) {
-        // Copy everything up to the next % (or end of string)
-        while ((fmt[0] != '%') && (fmt[0] != '\0')) {
-            IS_OUTPUT_RESUMABLE(1);
-            if (resume_output) {
-                buf[0] = fmt[0];
-                buf++;
-            }
-            needed_size++;
-            fmt++;
-        }
-
-        if (fmt[0] == '%') {
-            Char const *format_pointer = fmt;
-
-            fmt++;
-
-            // read the modifiers first
-            Sint minimum_width = 0; // called field width in documentation
-            Sint precision = -1;
-            Sint trailing_zeroes = 0;
-            U32 flags = 0;
-
-            // flags
-            while (true) {
-                switch (fmt[0]) {
-                    case '-': { // if we have left justify
-                        flags |= Print_Flags_LEFT_JUSTIFIED;
-                        fmt++;
-                        continue;
-                    } break;
-                    case '#': { // if we use alternate form
-                        flags |= Print_Flags_ALTERNATE_FORM;
-                        fmt++;
-                        continue;
-                    } break;
-                    case '+': { // if we have leading plus
-                        flags |= Print_Flags_LEADING_PLUS;
-                        fmt++;
-                        continue;
-                    } break;
-                    case ' ': { // if we have leading space
-                        flags |= Print_Flags_LEADING_SPACE;
-                        fmt++;
-                        continue;
-                    } break;
-                    case '0': { // if we have leading zero
-                        flags |= Print_Flags_LEADING_ZERO;
-                        fmt++;
-                        goto flags_done;
-                    } break;
-                    default: {
-                        goto flags_done;
-                    } break;
-                }
-            }
-        flags_done:
-
-            // get the field width
-            if (fmt[0] == '*') {
-                minimum_width = va_arg(va, Sint);
-                fmt++;
-            } else {
-                while ((fmt[0] >= '0') && (fmt[0] <= '9')) {
-                    minimum_width = (minimum_width * 10) + (fmt[0] - '0');
-                    fmt++;
-                }
-            }
-
-            // get the precision
-            if (fmt[0] == '.') {
-                fmt++;
-                if (fmt[0] == '*') {
-                    precision = va_arg(va, Sint);
-                    fmt++;
-                } else {
-                    precision = 0;
-
-                    if (fmt[0] == '-') { // Negative precision is treated as if precision was omitted
-                        fmt++;
-                        precision = -1;
-                        while ((fmt[0] >= '0') && (fmt[0] <= '9'));
-                    } else {
-                        while ((fmt[0] >= '0') && (fmt[0] <='9')) {
-                            precision = (precision * 10) + (fmt[0] - '0');
-                            fmt++;
-                        }
-                    }
-                }
-            }
-
-            // handle integer size overrides
-            switch (fmt[0]) {
-                case 'h': { // are we 64-bit
-                    flags |= Print_Flags_INT16;
-                    fmt++;
-                    if (fmt[0] == 'h') {
-                        flags &= ~cast_val(Print_Flags_INT16, U32);
-                        flags |= Print_Flags_INT8;
-                        fmt++;
-                    }
-                } break;
-                case 'l': { // are we 64-bit
-                    flags |= Print_Flags_INT64;
-                    fmt++;
-                    if (fmt[0] == 'l') fmt++;
-                } break;
-                case 'z': { // are we 64-bit on size_t?
-                    flags |= (sizeof(Size) == 8) ? Print_Flags_INT64 : 0;
-                    fmt++;
-                } break;
-                case 't': { // are we 64-bit on ptrdiff_t?
-                    flags |= (sizeof(Dptr) == 8) ? Print_Flags_INT64 : 0;
-                    fmt++;
-                } break;
-                default: {
-                } break;
-            }
-
-#  define PRINT_STR_SIZE 2048ULL
-            Char num_str[PRINT_STR_SIZE];
-            Char *num_str_ptr = num_str;
-            Char *str = NLIB_NULL;
-
-            Char head_str[8] = {0};
-            Size head_index = 0;
-
-            Char tail_str[8] = {0};
-            Size tail_index = 0;
-
-            Size len = 0;
-
-            switch (fmt[0]) { // handle each replacement
-                case 's': { // string
-                    // get the string
-                    str = va_arg(va, Char*);
-                    if (str == NLIB_NULL) {
-                        str = "null";
-                    }
-
-                    // NOTE(naman): By this point, str is most definitely not NLIB_NULL
-                    while (str[len] != '\0') {
-                        len++;
-                    }
-
-                    // clamp to precision
-                    // Since precision inits at -1, if none was mentioned, this will not execute
-                    if (len > cast_val(precision, Size)) {
-                        len = cast_val(precision, Size);
-                    }
-
-                    precision = 0;
-                } break;
-
-                case 'c': { // char
-                    // get the character
-                    str = num_str_ptr + PRINT_STR_SIZE - 1;
-                    *str = cast_val(va_arg(va, Sint), Char);
-                    len = 1;
-                    precision = 0;
-                } break;
-
-                case 'n': { // weird write-bytes specifier
-                    Sint *d = va_arg(va, Sint*);
-                    *d = cast_val((buf - buffer), Sint);
-                } break;
-
-                case 'b': case 'B':
-                case 'o': case 'O' :
-                case 'x': case 'X': { // binary
-                    enum { BIN, OCT, HEX } base;
-                    Bool upper = false;
-                    Char type = fmt[0];
-                    switch (type) {
-                        case 'b': base = BIN;               break;
-                        case 'B': base = BIN; upper = true; break;
-                        case 'o': base = OCT;               break;
-                        case 'O': base = OCT; upper = true; break;
-                        case 'x': base = HEX;               break;
-                        case 'X': base = HEX; upper = true; break;
-                        default:  {
-                            base = BIN; // To silence unitialized variable warning
-                            claim_err("Print: Integer base unitialized");
-                        } break;
-                    }
-
-                    U64 num;
-                    if (flags & Print_Flags_INT64) {
-                        num = va_arg(va, U64);
-                    } else {
-                        num = va_arg(va, U32);
-                    }
-
-                    U64 num_dec = num;
-                    if (flags & Print_Flags_INT8) {
-                        num_dec = cast_val(num_dec, U8);
-                    } else if (flags & Print_Flags_INT16) {
-                        num_dec = cast_val(num_dec, U16);
-                    }
-
-                    str = num_str_ptr + PRINT_STR_SIZE;
-
-                    if ((num == 0) && (precision == 0)) {
-                        break;
-                    }
-
-                    while (true) {
-                        U64 and_mask = 0;
-                        switch (base) {
-                            case BIN: and_mask = 0x1ULL; break;
-                            case OCT: and_mask = 0x7ULL; break;
-                            case HEX: and_mask = 0xFULL; break;
-                        }
-
-                        U64 shift_magnitude = 0;
-                        switch (base) {
-                            case BIN: shift_magnitude = 1ULL; break;
-                            case OCT: shift_magnitude = 3ULL; break;
-                            case HEX: shift_magnitude = 4ULL; break;
-                        }
-
-                        U64 n = num_dec & and_mask;
-                        num_dec = num_dec >> shift_magnitude;
-
-                        str--;
-                        switch (base) {
-                            case BIN: {
-                                *str = (n == 1) ? '1' : '0';
-                            } break;
-
-                            case OCT: {
-                                switch (n) {
-                                    case 0: *str = '0'; break;
-                                    case 1: *str = '1'; break;
-                                    case 2: *str = '2'; break;
-                                    case 3: *str = '3'; break;
-                                    case 4: *str = '4'; break;
-                                    case 5: *str = '5'; break;
-                                    case 6: *str = '6'; break;
-                                    case 7: *str = '7'; break;
-                                }
-                            } break;
-
-                            case HEX: {
-                                switch (n) {
-                                    case 0x0: *str = '0'; break;
-                                    case 0x1: *str = '1'; break;
-                                    case 0x2: *str = '2'; break;
-                                    case 0x3: *str = '3'; break;
-                                    case 0x4: *str = '4'; break;
-                                    case 0x5: *str = '5'; break;
-                                    case 0x6: *str = '6'; break;
-                                    case 0x7: *str = '7'; break;
-                                    case 0x8: *str = '8'; break;
-                                    case 0x9: *str = '9'; break;
-                                    case 0xA: *str = upper ? 'A' : 'a'; break;
-                                    case 0xB: *str = upper ? 'B' : 'b'; break;
-                                    case 0xC: *str = upper ? 'C' : 'c'; break;
-                                    case 0xD: *str = upper ? 'D' : 'd'; break;
-                                    case 0xE: *str = upper ? 'E' : 'e'; break;
-                                    case 0xF: *str = upper ? 'F' : 'f'; break;
-                                }
-                            } break;
-                        }
-
-                        if ((num_dec != 0) || (((num_str_ptr + PRINT_STR_SIZE) - str) < precision)) {
-                            continue;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    len = (cast_mem(num_str_ptr, Uptr) + PRINT_STR_SIZE) - cast_mem(str, Uptr);
-
-                    Char head_char = 0;
-                    switch (base) {
-                        case BIN: head_char = upper ? 'B' : 'b'; break;
-                        case OCT: head_char = upper ? 'O' : 'o'; break;
-                        case HEX: head_char = upper ? 'X' : 'x'; break;
-                    }
-
-                    if (flags & Print_Flags_ALTERNATE_FORM) {
-                        head_str[head_index++] = '0';
-                        if (upper) {
-                            head_str[head_index++] = head_char;
-                        } else {
-                            head_str[head_index++] = head_char;
-                        }
-                    }
-
-                    if (precision < 0) {
-                        precision = 0;
-                    }
-                } break;
-
-                case 'u':
-                case 'd': { // integer
-                    // get the integer and abs it
-                    U64 num = 0;
-                    if (flags & Print_Flags_INT64) {
-                        S64 i64 = va_arg(va, S64);
-                        num = cast_val(i64, U64);
-                        if ((fmt[0] != 'u') && (i64 < 0)) {
-                            num = cast_val(-i64, U64);
-                            flags |= Print_Flags_NEGATIVE;
-                        }
-                    } else {
-                        S32 i = va_arg(va, S32);
-                        num = cast_val(i, U32);
-                        if ((fmt[0] != 'u') && (i < 0)) {
-                            num = cast_val(-i, U32);
-                            flags |= Print_Flags_NEGATIVE;
-                        }
-                    }
-
-                    // convert to string
-                    U64 num_dec = num;
-                    if (flags & Print_Flags_INT8) {
-                        num_dec = cast_val(num_dec, U8);
-                    } else if (flags & Print_Flags_INT16) {
-                        num_dec = cast_val(num_dec, U16);
-                    }
-
-                    str = num_str_ptr + PRINT_STR_SIZE;
-
-                    if ((num == 0) && (precision == 0)) {
-                        break;
-                    }
-
-                    while (num_dec) {
-                        str--;
-                        *str = cast_val(num_dec % 10, Char) + '0';
-                        num_dec /= 10;
-                    }
-
-                    // get the length that we copied
-                    len = (cast_mem(num_str_ptr, Uptr) + PRINT_STR_SIZE) - cast_mem(str, Uptr);
-
-                    if (len == 0) {
-                        --str;
-                        *str = '0';
-                        len = 1;
-                    }
-
-                    if (flags & Print_Flags_NEGATIVE) {
-                        head_str[head_index++] = '-';
-                    }
-
-                    if (flags & Print_Flags_LEADING_PLUS) {
-                        head_str[head_index++] = '+';
-                    }
-
-                    if (flags & Print_Flags_LEADING_SPACE) {
-                        if (!(flags & Print_Flags_NEGATIVE)) {
-                            head_str[head_index++] = ' ';
-                        }
-                    }
-
-                    if (flags & Print_Flags_LEADING_ZERO) {
-                        head_str[head_index++] = '0';
-                    }
-
-                    if (precision < 0) {
-                        precision = 0;
-                    }
-                } break;
-
-                case 'p': { // pointer
-                    flags |= (sizeof(void*) == 8) ? Print_Flags_INT64 : 0;
-                    precision = sizeof(void*) * 2;
-
-                    U64 num = 0;
-                    if (flags & Print_Flags_INT64) {
-                        num = va_arg(va, U64);
-                    } else {
-                        num = va_arg(va, U32);
-                    }
-
-                    U64 num_dec = num;
-                    str = num_str_ptr + PRINT_STR_SIZE;
-
-                    while (true) {
-                        U64 n = num_dec & 0xf;
-                        num_dec = num_dec >> 4;
-
-                        str--;
-                        switch (n) {
-                            case 0x0: *str = '0'; break;
-                            case 0x1: *str = '1'; break;
-                            case 0x2: *str = '2'; break;
-                            case 0x3: *str = '3'; break;
-                            case 0x4: *str = '4'; break;
-                            case 0x5: *str = '5'; break;
-                            case 0x6: *str = '6'; break;
-                            case 0x7: *str = '7'; break;
-                            case 0x8: *str = '8'; break;
-                            case 0x9: *str = '9'; break;
-                            case 0xA: *str = 'A'; break;
-                            case 0xB: *str = 'B'; break;
-                            case 0xC: *str = 'C'; break;
-                            case 0xD: *str = 'D'; break;
-                            case 0xE: *str = 'E'; break;
-                            case 0xF: *str = 'F'; break;
-                        }
-
-                        if ((num_dec != 0) || (((num_str_ptr + PRINT_STR_SIZE) - str) < precision)) {
-                            continue;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    len = (cast_mem(num_str_ptr, Uptr) + PRINT_STR_SIZE) - cast_mem(str, Uptr);
-                } break;
-
-                case 'f': case 'F':
-                case 'e': case 'E':
-                case 'a': case 'A': {
-                    goto nlib_print_unimplemented_feature;
-                } break;
-
-                case '%': {
-                    str = num_str_ptr;
-                    str[0] = '%';
-                    len = 1;
-                    precision = 0;
-                } break;
-
-                case '\0': {
-                    // NOTE(naman): If the format string ends prematurely, we print
-                    // whatever half-formed conversion specification came through;
-                    // to do that, we decrement the pointer since we need to make
-                    // sure that we don't end up copying the terminating null byte,
-                    // since that will be put in the final output at the end. We
-                    // also want to decrement since after the next fmt++ (at the
-                    // end of the function), we want fmt to point to the null byte
-                    // so that the priting will properly end.
-                    fmt--;
-                    goto nlib_print_unimplemented_feature;
-                } break;
-
-                default: { // unknown, just copy conversion specification
-                nlib_print_unimplemented_feature:
-                    str = num_str_ptr;
-                    while (format_pointer <= fmt) {
-                        str[0] = format_pointer[0];
-                        format_pointer++;
-                        str++;
-                    }
-
-                    len = cast_val(str - num_str_ptr, Size);
-                    str = num_str_ptr;
-                    precision = 0;
-                } break;
-            }
-
-            Size head_size = head_index;
-            head_index = 0;
-            Size tail_size = tail_index;
-            tail_index = 0;
-
-            // get minimum_width=leading/trailing space, precision=leading zeros
-            if (cast_val(precision, Size) < len) {
-                precision = cast_val(len, Sint);
-            }
-
-            Sint zeros_head_tail = (precision +
-                                    cast_val(head_size, Sint) +
-                                    cast_val(tail_size, Sint) +
-                                    trailing_zeroes);
-            if (minimum_width < zeros_head_tail) {
-                minimum_width = zeros_head_tail;
-            }
-
-            minimum_width -= zeros_head_tail;
-            precision -= cast_val(len, Sint);
-
-            // handle right justify and leading zeros
-            if ((flags & Print_Flags_LEFT_JUSTIFIED) == 0) {
-                if (flags & Print_Flags_LEADING_ZERO) { // then everything is in precision
-                    precision = (minimum_width > precision) ? minimum_width : precision;
-                    minimum_width = 0;
-                }
-            }
-
-            // copy leading spaces
-            if ((minimum_width + precision) > 0) {
-                // copy leading spaces (or when doing %8.4d stuff)
-                if ((flags & Print_Flags_LEFT_JUSTIFIED) == 0) {
-                    IS_OUTPUT_RESUMABLE(minimum_width);
-                    if (resume_output) {
-                        memset(buf, ' ', cast_val(minimum_width, Size));
-                        buf += minimum_width;
-                    }
-                    needed_size += cast_val(minimum_width, Size);
-                }
-
-                { // copy the head
-                    IS_OUTPUT_RESUMABLE(head_size);
-                    if (resume_output) {
-                        memcpy(buf, head_str, head_size);
-                        buf += head_size;
-                    }
-                    needed_size += head_size;
-                    head_index += head_size;
-                }
-
-                { // copy leading zeros
-                    IS_OUTPUT_RESUMABLE(precision);
-                    if (resume_output) {
-                        memset(buf, '0', cast_val(precision, Size));
-                        buf += precision;
-                    }
-                    needed_size += cast_val(precision, Size);
-                }
-            }
-
-            { // copy the head
-                if (head_index < head_size) {
-                    Size repeat = head_size - head_index;
-                    IS_OUTPUT_RESUMABLE(repeat);
-                    if (resume_output) {
-                        memcpy(buf, head_str, repeat);
-                        buf += repeat;
-                    }
-                    head_index += repeat;
-                    needed_size += repeat;
-                }
-            }
-
-            { // copy the string
-                IS_OUTPUT_RESUMABLE(len);
-                if (resume_output) {
-                    memcpy(buf, str, len);
-                    buf += len;
-                }
-                str += len;
-                needed_size += len;
-            }
-
-            { // copy trailing zeroes
-                IS_OUTPUT_RESUMABLE(trailing_zeroes);
-                if (resume_output) {
-                    memset(buf, '0', cast_val(trailing_zeroes, Size));
-                    buf += cast_val(trailing_zeroes, Size);
-                }
-                needed_size += cast_val(trailing_zeroes, Size);
-            }
-
-            { // copy the tail
-                IS_OUTPUT_RESUMABLE(tail_size);
-                if (resume_output) {
-                    memcpy(buf, tail_str, tail_size);
-                    buf += tail_size;
-                }
-                needed_size += tail_size;
-            }
-
-            // handle the left justify
-            if (flags & Print_Flags_LEFT_JUSTIFIED)
-                if (minimum_width > 0) {
-                    IS_OUTPUT_RESUMABLE(minimum_width);
-                    if (resume_output) {
-                        memset(buf, ' ', cast_val(minimum_width, Size));
-                        buf += minimum_width;
-                    }
-                    needed_size += cast_val(minimum_width, Size);
-                }
-
-            fmt++;
-        } else if (fmt[0] =='\0') {
-            break;
-        }
-    }
-
-    // NOTE(naman): IS_OUTPUT_RESUMABLE always preserves space for 1 null character;
-    // thus, the check isn't necessary.
-    if (buffer != NLIB_NULL) {
-        buf[0] = '\0';
-        buf++;
-    }
-
-    Size result = needed_size;
-    return result;
-}
-
-#  if defined(OS_WINDOWS)
-
-header_function
-Size printConsole (Sint fd, Char const *format, va_list ap)
-{
-    va_list ap1, ap2;
-    va_copy(ap1, ap);
-    va_copy(ap2, ap);
-
-    // FIXME(naman): Remove these double calls once printStringVarArg starts yielding
-    Size buffer_size = printStringVarArg(NLIB_NULL, 0, format, ap1);
-    Char *buffer = cast_val(memAlloc(NLIB_PRINT_ALLOCATOR, buffer_size + 1), Char*);
-    printStringVarArg(buffer, buffer_size + 1, format, ap2);
-
-    HANDLE out_stream;
-    if (fd == 1) {
-        out_stream = GetStdHandle(STD_OUTPUT_HANDLE);
-    } else {
-        out_stream = GetStdHandle(STD_ERROR_HANDLE);
-    }
-
-    if ((out_stream != NLIB_NULL) && (out_stream != INVALID_HANDLE_VALUE)) {
-        DWORD written = 0;
-        // FIND(naman): Should we convert this ASCII/UTF-8 buffer to UTF-16?
-        // NOTE(naman): We use WriteFile instead of WriteConsoleA/W here since
-        // WriteConsole functions can't be redirected to write to a file,
-        // while WriteFile obviously can be.
-        WriteFile(out_stream, buffer, cast_val(buffer_size, DWORD), &written, NLIB_NULL);
-    }
-
-    memDealloc(NLIB_PRINT_ALLOCATOR, cast_val(buffer, void*), buffer_size + 1);
-
-    va_end(ap1);
-    va_end(ap2);
-
-    return buffer_size;
-}
-
-header_function
-Size printDebugOutputV (Char const *format, va_list ap)
-{
-    va_list ap1, ap2;
-    va_copy(ap1, ap);
-    va_copy(ap2, ap);
-
-    // FIXME(naman): Remove these double calls once printStringVarArg starts yielding
-    Size buffer_size = printStringVarArg(NLIB_NULL, 0, format, ap1);
-    Char *buffer = cast_val(memAlloc(NLIB_PRINT_ALLOCATOR, buffer_size + 1), Char*);
-    printStringVarArg(buffer, buffer_size + 1, format, ap2);
-
-    Size wcstr_size;
-    LPWSTR wcstr = unicodeWin32UTF16FromUTF8(buffer, &wcstr_size);
-    OutputDebugStringW(wcstr);
-    unicodeWin32UTF16Dealloc(wcstr, wcstr_size);
-
-    memDealloc(NLIB_PRINT_ALLOCATOR, cast_val(buffer, void*), buffer_size + 1);
-
-    va_end(ap1);
-    va_end(ap2);
-
-    return buffer_size;
-}
-
-header_function
-Size printDebugOutput (Char const *format, ...)
-{
-    va_list ap;
-
-    va_start(ap, format);
-    Size result = printDebugOutputV(format, ap);
-    va_end(ap);
-
-    return result;
-}
-
-#  elif defined(OS_LINUX)
-
-header_function
-Size printConsole (Sint fd, Char const *format, va_list ap)
-{
-    va_list ap1, ap2;
-    va_copy(ap1, ap);
-    va_copy(ap2, ap);
-
-    // FIXME(naman): Remove these double calls once printStringVarArg starts yielding
-    Size buffer_size = printStringVarArg(NLIB_NULL, 0, format, ap1);
-    Char *buffer = (Char*)memAlloc(NLIB_PRINT_ALLOCATOR, buffer_size + 1);
-    printStringVarArg(buffer, buffer_size + 1, format, ap2);
-
-    if (fd == 1) {
-        fputs(buffer, stdout);
-    } else {
-        fputs(buffer, stderr);
-    }
-
-    memDealloc(NLIB_PRINT_ALLOCATOR, (void*)buffer, buffer_size + 1);
-
-    va_end(ap1);
-    va_end(ap2);
-
-    return buffer_size;
-}
-
-#  endif
-
-header_function
-Size printString (Char *buffer, Size buffer_size, Char const *format, ...)
-{
-    va_list ap;
-
-    va_start(ap, format);
-    Size result = printStringVarArg(buffer, buffer_size, format, ap);
-    va_end(ap);
-
-    return result;
-}
-
-#  if defined(COMPILER_CLANG) || defined(COMPILER_GCC)
-__attribute__((format(__printf__, 1, 2)))
-#  endif
-header_function
-Size say (Char const *format, ...)
-{
-    va_list ap;
-
-    va_start(ap, format);
-    Size result = printConsole(1, format, ap);
-    va_end(ap);
-
-    return result;
-}
-
-header_function
-Size sayv (Char const *format, va_list ap)
-{
-    Size result = printConsole(1, format, ap);
-    return result;
-}
-
-#  if defined(COMPILER_CLANG) || defined(COMPILER_GCC)
-__attribute__((format(__printf__, 1, 2)))
-#  endif
-header_function
-Size err (Char const *format, ...)
-{
-    va_list ap;
-
-    va_start(ap, format);
-    Size result = printConsole(2, format, ap);
-    va_end(ap);
-
-    return result;
-}
-
-header_function
-Size errv (Char const *format, va_list ap)
-{
-    Size result = printConsole(2, format, ap);
-    return result;
-}
-
-# endif // NLIB_EXCLUDE_PRINT
-
 /* ===================
  * @Unit Test
  */
 
 # if !defined(NLIB_EXCLUDE_UNIT_TEST)
 
-#  define utTest(cond) ut_Test(cond, #cond, __FILE__, __LINE__)
+global_variable Uint GLOBAL_ut_block_failed_tests = 0;
+global_variable Uint GLOBAL_ut_suite_failed_tests = 0;
+global_variable Uint GLOBAL_ut_suite_test_counter = 0;
+
+
+#define utSuite(param_str, param_quit_on_fail)                          \
+    { /* Initialization */                                              \
+        printErr(param_str);                                            \
+        printErr("\n");                                                 \
+        GLOBAL_ut_suite_failed_tests = 0;                               \
+        GLOBAL_ut_suite_test_counter = 0;                               \
+    }                                                                   \
+                                                                        \
+    goto gensym_line(jump_to_else);                                     \
+                                                                        \
+    while (true)                                                        \
+        if (true) { /* Finalization */                                  \
+            /* This block executes after the following code block */    \
+            printErr("REPORT: ");                                       \
+            if (GLOBAL_ut_suite_failed_tests == 0) {                    \
+                printErr("All tests succeeded\n");                      \
+            } else {                                                    \
+                printErrNum(GLOBAL_ut_suite_failed_tests);              \
+                if (GLOBAL_ut_suite_failed_tests == 1) {                \
+                    printErr(" TEST FAILED\n");                         \
+                } else {                                                \
+                    printErr(" TESTS FAILED\n");                        \
+                }                                                       \
+            }                                                           \
+                                                                        \
+            printf("------------------------------------------------------------\n"); \
+            if (param_quit_on_fail) utQuitOnFail();                     \
+            break;                                                      \
+        } else gensym_line(jump_to_else):
+
+#define utBlock(param_str)                                              \
+    { /* Initialization */                                              \
+        printErr("\t");                                                 \
+        printErr(param_str);                                            \
+        printErr("\n");                                                 \
+        GLOBAL_ut_block_failed_tests = 0;                               \
+    }                                                                   \
+                                                                        \
+    goto gensym_line(jump_to_else);                                     \
+                                                                        \
+    while (true)                                                        \
+        if (true) { /* Finalization */                                  \
+            /* This block executes after the following code block */    \
+            if (GLOBAL_ut_block_failed_tests != 0) {                    \
+                printErr("\t##### ");                                   \
+                printErrNum(GLOBAL_ut_block_failed_tests);              \
+                if (GLOBAL_ut_block_failed_tests == 1) {                \
+                    printErr(" TEST FAILED #####\n");                   \
+                } else {                                                \
+                    printErr(" TESTS FAILED #####\n");                  \
+                }                                                       \
+            }                                                           \
+                                                                        \
+            break;                                                      \
+        } else gensym_line(jump_to_else):
+
+#define utTest(cond) ut_Test(cond, #cond, __FILE__, __LINE__)
 
 header_function
-void ut_Test (Bool cond,
-              Char *cond_str,
-              Char *filename, U32 line_num) {
-    if (!cond) {
-        report("Test Failed: (%s:%u) %s\n", filename, line_num, cond_str);
+void ut_Test (Bool cond, Char *cond_str, Char *filename, U32 line_num)
+{
+    GLOBAL_ut_suite_test_counter++;
+
+    if (cond) {
+//        printErr("\t\tTest #");
+//        printErrNum(GLOBAL_ut_suite_test_counter);
+//        printErr(": -passed-\n");
+    } else {
+        printErr("\t\tTest #");
+        printErrNum(GLOBAL_ut_suite_test_counter);
+        printf(": *FAILED*: \"");
+        printErr(cond_str);
+        printErr("\" in ");
+        printErr(filename);
+        printErr(":");
+        printErrNum(line_num);
+        printErr("\n");
+        GLOBAL_ut_block_failed_tests++;
+        GLOBAL_ut_suite_failed_tests++;
+    }
+
+    return;
+}
+
+header_function
+Bool utSomeTestsFailed (void)
+{
+    return GLOBAL_ut_suite_failed_tests != 0;
+}
+
+header_function
+void utQuitOnFail (void)
+{
+    if (utSomeTestsFailed()) {
         breakpoint();
     }
 }
 
 # endif // NLIB_EXCLUDE_UNIT_TEST
-
-/* ===================
- * @Profiling
- */
-
-# if !defined(NLIB_EXCLUDE_PROFILING)
-
-typedef struct {
-    U64 flags;
-
-#  if defined(OS_LINUX)
-    int group_leader_fd;
-
-    int cycles_fd;
-    int instructions_fd;
-    int task_clock_fd;
-
-    U64 group_leader_id;
-
-    U64 cycles_id;
-    U64 instructions_id;
-    U64 task_clock_id;
-
-    Bool grouped_reads;
-
-    Byte pad_[7];
-#  endif
-} Profiler;
-
-#  define Profiler_CYCLES       (1ULL << 0)
-#  define Profiler_INSTRUCTIONS (1ULL << 2)
-#  define Profiler_TIME         (1ULL << 3)
-#  define Profiler_TOTAL        (3U)
-
-#  define Profiler_ALL          (~0ULL)
-
-typedef struct {
-    U64 flags;
-
-    U64 cycles;
-    U64 instructions;
-    U64 time; // In nanoseconds
-} Profiler_Result;
-
-header_function
-Bool profilerHasFlag (Profiler *profiler, U64 flag)
-{
-    return ((profiler->flags & flag) == flag);
-}
-
-header_function
-Bool profilerResultHasFlag (Profiler_Result *result, U64 flag)
-{
-    return ((result->flags & flag) == flag);
-}
-
-header_function
-U64 profilerResultRead (Profiler_Result *result, U64 flag)
-{
-    switch (flag) {
-        case Profiler_CYCLES: {
-            return result->cycles;
-        } break;
-        case Profiler_INSTRUCTIONS: {
-            return result->instructions;
-        } break;
-        case Profiler_TIME: {
-            return result->time;
-        }
-    }
-
-    return 0;
-}
-
-#  if defined(OS_LINUX)
-
-typedef struct {
-    U64 value;
-    U64 time_enabled;
-    U64 time_running;
-    U64 id;
-} Profiler_Linux_Output_;
-
-#   if defined(LANG_CPP)
-#    define FLEXIBLE_ARRAY_MEMBER_SYNTAX 0
-#   elif defined(LANG_C)
-#    define FLEXIBLE_ARRAY_MEMBER_SYNTAX
-#   endif
-typedef struct {
-    U64 count;
-    U64 time_enabled;
-    U64 time_running;
-    struct {
-        U64 value;
-        U64 id;
-    } values[FLEXIBLE_ARRAY_MEMBER_SYNTAX];
-} Profiler_Linux_Group_Output_;
-#   undef FLEXIBLE_ARRAY_MEMBER_SYNTAX
-
-header_function
-int profiler_LinuxPerfEventOpen (struct perf_event_attr *hw_event, pid_t pid,
-                                 int cpu, int group_fd, unsigned long flags)
-{
-    int ret = (int)syscall(__NR_perf_event_open, hw_event, pid, cpu, group_fd, flags);
-    return ret;
-}
-
-header_function
-Profiler profilerCreate (U64 flags)
-{
-    Profiler profiler = NLIB_ZERO_INIT_LIST;
-
-    if (flags != 0) {
-        struct perf_event_attr group_leader = {
-            .type = PERF_TYPE_SOFTWARE,
-            .size = sizeof(struct perf_event_attr),
-            .config = PERF_COUNT_SW_DUMMY,
-            .read_format = (PERF_FORMAT_TOTAL_TIME_ENABLED | // Last end time - first start time
-                            PERF_FORMAT_TOTAL_TIME_RUNNING | // sum_of(ith last time - ith first time)
-                            PERF_FORMAT_GROUP |              // get entire group's values with one read
-                            PERF_FORMAT_ID),                 // unique id
-            .disabled = 1,
-            .exclude_kernel = 1,
-            .exclude_hv = 1,
-        };
-
-        profiler.grouped_reads = (group_leader.read_format & PERF_FORMAT_GROUP) != 0;
-
-        profiler.group_leader_fd = profiler_LinuxPerfEventOpen(&group_leader, 0, -1, -1, 0);
-        if (profiler.group_leader_fd == -1) {
-            report("Error opening leader %llx\n", group_leader.config);
-            return profiler;
-        }
-
-        ioctl(profiler.group_leader_fd, PERF_EVENT_IOC_ID, &profiler.group_leader_id);
-    }
-
-    if ((flags & Profiler_CYCLES) == Profiler_CYCLES) {
-        struct perf_event_attr cycles = {
-            .type = PERF_TYPE_HARDWARE,
-            .size = sizeof(struct perf_event_attr),
-            .config = PERF_COUNT_HW_REF_CPU_CYCLES,
-        };
-
-        profiler.cycles_fd = profiler_LinuxPerfEventOpen(&cycles, 0, -1, profiler.group_leader_fd, 0);
-
-        if (profiler.cycles_fd == -1) {
-            report("Error opening leader %llx\n", cycles.config);
-        } else {
-            profiler.flags |= Profiler_CYCLES;
-            ioctl(profiler.cycles_fd, PERF_EVENT_IOC_ID, &profiler.cycles_id);
-        }
-    }
-
-    if ((flags & Profiler_INSTRUCTIONS) == Profiler_INSTRUCTIONS) {
-        struct perf_event_attr instructions = {
-            .type = PERF_TYPE_HARDWARE,
-            .size = sizeof(struct perf_event_attr),
-            .config = PERF_COUNT_HW_INSTRUCTIONS,
-        };
-
-        profiler.instructions_fd = profiler_LinuxPerfEventOpen(&instructions, 0, -1, profiler.group_leader_fd, 0);
-
-        if (profiler.instructions_fd == -1) {
-            report("Error opening leader %llx\n", instructions.config);
-        } else {
-            profiler.flags |= Profiler_INSTRUCTIONS;
-            ioctl(profiler.instructions_fd, PERF_EVENT_IOC_ID, &profiler.instructions_id);
-        }
-    }
-
-    if ((flags & Profiler_TIME) == Profiler_TIME) {
-        struct perf_event_attr task_clock = {
-            .type = PERF_TYPE_SOFTWARE,
-            .size = sizeof(struct perf_event_attr),
-            .config = PERF_COUNT_SW_TASK_CLOCK ,
-        };
-
-        profiler.task_clock_fd = profiler_LinuxPerfEventOpen(&task_clock, 0, -1, profiler.group_leader_fd, 0);
-
-        if (profiler.task_clock_fd == -1) {
-            report("Error opening leader %llx\n", task_clock.config);
-        } else {
-            profiler.flags |= Profiler_TIME;
-            ioctl(profiler.task_clock_fd, PERF_EVENT_IOC_ID, &profiler.task_clock_id);
-        }
-    }
-
-    ioctl(profiler.group_leader_fd, PERF_EVENT_IOC_RESET, PERF_IOC_FLAG_GROUP);
-
-    return profiler;
-}
-
-header_function
-void profilerStartProfile (Profiler *profiler)
-{
-    if (profiler->flags != 0) {
-        ioctl(profiler->group_leader_fd, PERF_EVENT_IOC_ENABLE, PERF_IOC_FLAG_GROUP);
-    }
-}
-
-header_function
-Profiler_Result profilerEndProfile (Profiler *profiler)
-{
-    Profiler_Result result = {.flags = profiler->flags};
-
-    if (profiler->flags != 0) {
-        ioctl(profiler->group_leader_fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP);
-
-        if (profiler->grouped_reads) {
-            Char buffer[4096]; // NOTE(naman): Make sure this isn't changed to be too big for stack
-            static_assert(sizeof(buffer) >= (sizeof(Profiler_Linux_Group_Output_) +
-                                             Profiler_TOTAL * 2 * sizeof(U64)),
-                          "Profiler (Linux): Buffer is not large enough to hold all data of all events");
-            read(profiler->group_leader_fd, buffer, sizeof(buffer));
-
-            Profiler_Linux_Group_Output_* output = (Profiler_Linux_Group_Output_*)buffer;
-
-#   define EVENT_IS(s, C) ((output->values[i].id == profiler->s##_id) && profilerHasFlag(profiler, Profiler_##C))
-            for (U64 i = 0; i < output->count; i++) {
-                if (EVENT_IS(cycles, CYCLES)) {
-                    result.cycles = output->values[i].value;
-                } else if (EVENT_IS(instructions, INSTRUCTIONS)) {
-                    result.instructions = output->values[i].value;
-                } else if (EVENT_IS(task_clock, TIME)) {
-                    result.time = output->values[i].value;
-                }
-            }
-#   undef EVENT_IS
-        } else {
-            Profiler_Linux_Output_ cycles, instructions, time;
-            read(profiler->cycles_fd, &cycles, sizeof(cycles));
-            read(profiler->instructions_fd, &instructions, sizeof(instructions));
-            read(profiler->task_clock_fd, &time, sizeof(time));
-
-            result.cycles = cycles.value;
-            result.instructions = instructions.value;
-            result.time = time.value;
-        }
-    }
-
-    ioctl(profiler->group_leader_fd, PERF_EVENT_IOC_RESET, PERF_IOC_FLAG_GROUP);
-
-    return result;
-}
-
-header_function
-void profilerDelete (Profiler *profiler)
-{
-    close(profiler->cycles_fd);
-    close(profiler->instructions_fd);
-    close(profiler->task_clock_fd);
-    close(profiler->group_leader_fd);
-}
-
-#  endif // define(OS_LINUX)
-
-# endif // NLIB_EXCLUDE_PROFILING
 
 
 /* ==================
@@ -2319,112 +1414,6 @@ U64 hashUniversal (Hash_Universal h, U64 key)
 # endif // NLIB_EXCLUDE_HASHING
 
 
-/* ===============
- * @String
- */
-
-// TODO(naman): Add a sds-like string library
-
-
-/* ==================
- * @CString
- */
-
-# if !defined(NLIB_EXCLUDE_CSTRING)
-
-#  if defined(NLIB_NOLIBC)
-header_function
-Sint strcmp (const Char *s1, const Char *s2)
-{
-    while(s1[0]) {
-        if (s1[0] != s2[0]) break;
-        s1++;
-        s2++;
-    }
-
-    return s1[0] - s2[0];
-}
-
-header_function
-Sint strncmp (const Char *s1, const Char *s2, Size count)
-{
-    Sint result = 0;
-
-    for (Size i = 0; i < count; i++)
-    {
-        if (s1[i] != s2[i]) {
-            result = (s1[i] < s2[i]) ? -1 : 1;
-            break;
-        }
-    }
-
-    return result;
-}
-
-header_function
-Size strlen (const Char *s)
-{
-    Size len = 0;
-
-    for (Size i = 0; s[i] != '\0'; i++) {
-        len++;
-    }
-
-    len++;
-
-    return len;
-}
-#  endif
-
-header_function
-Bool streq (const Char *str1, const Char *str2)
-{
-    Bool result = (strcmp(str1, str2) == 0);
-    return result;
-}
-
-header_function
-Bool strneq (const Char *str1, const Char *str2, Size count)
-{
-    Bool result = (strncmp(str1, str2, count) == 0);
-    return result;
-}
-
-header_function
-Size strprefix (Char *str, Char *pre)
-{
-    Size lenpre = strlen(pre);
-    Size lenstr = strlen(str);
-
-    if (lenstr < lenpre) {
-        return 0;
-    } else {
-        if (strneq(pre, str, lenpre)) {
-            return lenpre;
-        } else {
-            return 0;
-        }
-    }
-}
-
-header_function
-Size strsuffix (Char *str, Char *suf)
-{
-    Size lensuf = strlen(suf);
-    Size lenstr = strlen(str);
-
-    if (lenstr < lensuf) {
-        return 0;
-    } else {
-        if (strneq(suf, str + (lenstr - lensuf), lensuf)) {
-            return lensuf;
-        } else {
-            return 0;
-        }
-    }
-}
-
-# endif // NLIB_EXCLUDE_CSTRING
 
 /* =========================================================
  * Data Structures =========================================
@@ -2478,18 +1467,18 @@ typedef struct Ra_Header {
 #  define ra_Cap(sb)          (ra_GetHeader(sb)->cap)
 
 #  define ra_IsFull(sb)       ((ra_Len(sb)+1) > ra_Cap(sb))
-#  define ra_IsNULL(sb)       ((sb) == NULL)
+#  define ra_IsNULL(sb)       ((sb) == NLIB_NULL)
 
 #  define ra_CheckAndGrow(sb) (ra_IsFull(sb) ? ra_Grow((sb), sizeof(*(sb))) : (sb))
 
 #  define ra(T) T *
 
-#  define raCreate(var)                           ra_Create(sizeof(*(var)),  0,       memCRTGet())
-#  define raCreateSized(var, min_cap)             ra_Create(sizeof(*(var)),  min_cap, memCRTGet())
+#  define raCreate(var)                           ra_Create(sizeof(*(var)),  0,       memHeapGet())
+#  define raCreateSized(var, min_cap)             ra_Create(sizeof(*(var)),  min_cap, memHeapGet())
 #  define raCreateAlloc(var, alloc)               ra_Create(sizeof(*(var)),  0,       alloc)
 #  define raCreateAllocSized(var, min_cap, alloc) ra_Create(sizeof(*(var)),  min_cap, alloc)
 
-#  define raDelete(sb)      (ra_Delete((sb), sizeof(*sb)), (sb) = NULL)
+#  define raDelete(sb)      (ra_Delete((sb), sizeof(*sb)), (sb) = NLIB_NULL)
 
 #  define raAdd(sb, ...)    ((sb) = ra_CheckAndGrow(sb),        \
                              (sb)[ra_Len(sb)] = (__VA_ARGS__),  \
@@ -2549,7 +1538,7 @@ void* ra_GrowToSize (void *buf, Size elem_count, Size elem_size)
 
     Size new_cap = mMax(elem_count, 16U);
     Size new_size = (new_cap * elem_size) + memAlignUp(sizeof(Ra_Header));
-    Ra_Header *new_header = NULL;
+    Ra_Header *new_header = NLIB_NULL;
 
     new_header = (Ra_Header *)memRealloc(allocator, ra_GetHeader(buf), new_size, old_size);
 
@@ -2667,8 +1656,8 @@ ra(T) ra_Create (ra(T) *, Size min_cap, Memory_Allocator allocator)
     return result;
 }
 
-#  define raCreate(var)                           ra_Create(&var, 0,       memCRTGet())
-#  define raCreateSized(var, min_cap)             ra_Create(&var, min_cap, memCRTGet())
+#  define raCreate(var)                           ra_Create(&var, 0,       memHeapGet())
+#  define raCreateSized(var, min_cap)             ra_Create(&var, min_cap, memHeapGet())
 #  define raCreateAlloc(var, alloc)               ra_Create(&var, 0,       alloc)
 #  define raCreateAllocSized(var, min_cap, alloc) ra_Create(&var, min_cap, alloc)
 
@@ -2705,97 +1694,6 @@ void ra_Delete (ra(T) &sb)
 
 # endif // !defined(NLIB_EXCLUDE_RA)
 
-/* ===============================
- * String Builder (stringbuilder)
- */
-
-# if !defined(NLIB_EXCLUDE_STRING_BUILDER)
-
-typedef struct {
-    ra(Char) str;
-} String_Builder;
-
-#  if defined(LANG_C)
-#   define sbCreate()                         (String_Builder){.str = ra_Create(sizeof(Char),  0,       memCRTGet())}
-#   define sbCreateSized(min_cap)             (String_Builder){.str = ra_Create(sizeof(Char),  min_cap, memCRTGet())}
-#   define sbCreateAlloc(alloc)               (String_Builder){.str = ra_Create(sizeof(Char),  0,       alloc)}
-#   define sbCreateAllocSized(min_cap, alloc) (String_Builder){.str = ra_Create(sizeof(Char),  min_cap, alloc)}
-#  elif defined(LANG_CPP)
-#   define sbCreate()                         {ra_Create(cast_val(NLIB_NULL, ra(Char)*),  0,       memCRTGet())}
-#   define sbCreateSized(min_cap)             {ra_Create(cast_val(NLIB_NULL, ra(Char)*),  min_cap, memCRTGet())}
-#   define sbCreateAlloc(alloc)               {ra_Create(cast_val(NLIB_NULL, ra(Char)*),  0,       alloc)}
-#   define sbCreateAllocSized(min_cap, alloc) {ra_Create(cast_val(NLIB_NULL, ra(Char)*),  min_cap, alloc)}
-#  endif
-
-header_function
-void sbDelete (String_Builder sb)
-{
-    raDelete(sb.str);
-    return;
-}
-
-#  define sbPrint(sb, ...)         ((sb).str = sb_Print((sb).str, __VA_ARGS__))
-//#  define sbPrintSized(sb, s, ...) ((sb).str = sb_PrintSized((sb).str, s, __VA_ARGS__))
-
-#  if defined(COMPILER_CLANG) || defined(COMPILER_GCC)
-__attribute__((format(__printf__, 2, 3)))
-#  endif
-header_function
-ra(Char) sb_Print (ra(Char) buf, const Char *fmt, ...)
-{
-    va_list args;
-
-    va_start(args, fmt);
-    Size cap = raMaxElemin(buf) - raElemin(buf);
-    Size print_size = printStringVarArg(raOnePastLast(buf), cap, fmt, args);
-    Size n = 1 + print_size;
-    va_end(args);
-
-    if (cast_val(n, Size) > cap) {
-        raResize(buf, raSizeof(buf) + n);
-        Size new_cap = raMaxSizeof(buf) - raSizeof(buf);
-        va_start(args, fmt);
-        n = 1 + printStringVarArg(raOnePastLast(buf), new_cap, fmt, args);
-        va_end(args);
-    }
-
-#  if defined(LANG_C)
-    ra_GetHeader(buf)->len += (n - 1);
-#  elif defined(LANG_CPP)
-    buf.len += (n - 1);
-#  endif
-
-    return buf;
-}
-
-/* header_function */
-/* Char* sb_PrintSized (Char *buf, Size size, const Char *fmt, ...) */
-/* { */
-/*     if ((size + raElemin(buf)) > raMaxElemin(buf)) { */
-/*         raResize(buf, size + raElemin(buf) + 1); */
-/*     } */
-
-/*     va_list args; */
-/*     va_start(args, fmt); */
-/*     printStringVarArg(raOnePastLast(buf), size + 1, fmt, args); */
-/*     va_end(args); */
-
-/*     ra_GetHeader(buf)->len += size; */
-/*     return buf; */
-/* } */
-
-header_function
-Bool sbIsEmpty (String_Builder sb) {
-    return raElemin(sb.str) == 0;
-}
-
-header_function
-Char* sbString (String_Builder sb)
-{
-    return raPtr(sb.str);
-}
-
-# endif // !defined(NLIB_EXCLUDE_STRING_BUILDER)
 
 /* ===============================
  * Intrusive Circular Doubly Linked List
@@ -2861,8 +1759,8 @@ header_function
 void listRemove (List_Node *entry)
 {
     list_RemoveNodeBetween(entry->prev, entry->next);
-    entry->next = NULL;
-    entry->prev = NULL;
+    entry->next = NLIB_NULL;
+    entry->prev = NLIB_NULL;
 }
 
 header_function
@@ -2992,7 +1890,7 @@ Intern internCreateAlloc (Memory_Allocator allocator)
 header_function
 Intern internCreate (void)
 {
-    return internCreateAlloc(memCRTGet());
+    return internCreateAlloc(memHeapGet());
 }
 
 
@@ -3028,7 +1926,7 @@ void internData (Intern *it, U8 hash1, U8 hash2, Size index)
 {
     raAdd(it->lists[hash1].secondary_hashes, hash2);
     raAdd(it->lists[hash1].indices, index);
-    utTest(raElemin(it->lists[hash1].secondary_hashes) == raElemin(it->lists[hash1].indices));
+    claim(raElemin(it->lists[hash1].secondary_hashes) == raElemin(it->lists[hash1].indices));
 }
 
 header_function
@@ -3118,7 +2016,7 @@ Intern_String internStringCreateAlloc (Memory_Allocator allocator)
 header_function
 Intern_String internStringCreate (void)
 {
-    return internStringCreateAlloc(memCRTGet());
+    return internStringCreateAlloc(memHeapGet());
 }
 
 header_function
@@ -3174,7 +2072,8 @@ void internStringDebugPrint (Intern_String *is)
 {
     for (Size i = 0; i < elemin(is->intern.lists); i++) {
         for (Size j = 0; j < raElemin(is->intern.lists[i].indices); j++) {
-            report("%s\n", raPtr(is->strings[is->intern.lists[i].indices[j]]));
+            printErr(raPtr(is->strings[is->intern.lists[i].indices[j]]));
+            printErr("\n");
         }
     }
 }
@@ -3200,7 +2099,7 @@ Intern_Integer internIntegerCreateAlloc (Memory_Allocator allocator)
 header_function
 Intern_Integer internIntegerCreate (void)
 {
-    return internIntegerCreateAlloc(memCRTGet());
+    return internIntegerCreateAlloc(memHeapGet());
 }
 
 header_function
@@ -3298,8 +2197,8 @@ typedef struct Hash_Table {
     U64 collision_count;
 } Hash_Table;
 
-#  define htCreate()                           ht_Create(0,         memCRTGet())
-#  define htCreateSlots(min_slots)             ht_Create(min_slots, memCRTGet())
+#  define htCreate()                           ht_Create(0,         memHeapGet())
+#  define htCreateSlots(min_slots)             ht_Create(min_slots, memHeapGet())
 #  define htCreateAlloc(alloc)                 ht_Create(0,         alloc)
 #  define htCreateSlotsAlloc(min_slots, alloc) ht_Create(min_slots, alloc)
 
@@ -3571,8 +2470,8 @@ typedef struct Map_Userdata {
 #  define map_DirtySlots(m) raElemin(m)
 #  define map_TotalSlots(m) raMaxElemin(m)
 
-#  define mapCreate(var)                           map_Create(sizeof(*(var)),  0,       memCRTGet())
-#  define mapCreateSized(var, min_cap)             map_Create(sizeof(*(var)),  min_cap, memCRTGet())
+#  define mapCreate(var)                           map_Create(sizeof(*(var)),  0,       memHeapGet())
+#  define mapCreateSized(var, min_cap)             map_Create(sizeof(*(var)),  min_cap, memHeapGet())
 #  define mapCreateAlloc(var, alloc)               map_Create(sizeof(*(var)),  0,       alloc)
 #  define mapCreateAllocSized(var, min_cap, alloc) map_Create(sizeof(*(var)),  min_cap, alloc)
 
@@ -3743,8 +2642,8 @@ struct Map_Struct {
 #  define map_DataPtrType(T) Map_Struct<T> *
 #  define map_GetDataPtr(v)  &v
 
-#  define mapCreate(var)                           map_Create(&var, 0,       memCRTGet())
-#  define mapCreateSized(var, min_cap)             map_Create(&var, min_cap, memCRTGet())
+#  define mapCreate(var)                           map_Create(&var, 0,       memHeapGet())
+#  define mapCreateSized(var, min_cap)             map_Create(&var, min_cap, memHeapGet())
 #  define mapCreateAlloc(var, alloc)               map_Create(&var, 0,       alloc)
 #  define mapCreateAllocSized(var, min_cap, alloc) map_Create(&var, min_cap, alloc)
 
@@ -3786,201 +2685,6 @@ void map_Delete (map(T) &m)
 #  define mapGetRef(m, k)   ((m).GetRef(k))
 
 # endif // !defined(NLIB_EXCLUDE_MAP)
-
-/* ==============
- * Concurrent Ring (Lock-based Multi-producer Multi-consumer)
- */
-
-# if defined(LANG_C) && !defined(NLIB_EXCLUDE_RING_LOCKED)
-
-#  if !defined(NLIB_RING_LOCKED_ALLOCATOR)
-#   if defined(NLIB_ALLOCATOR)
-#    define NLIB_RING_LOCKED_ALLOCATOR NLIB_ALLOCATOR
-#   elif defined(NLIB_NOLIBC)
-#    error "nlib: Ring_Locked: NLIB_RING_LOCKED_ALLOCATOR required with nolibc"
-#   else
-#    define NLIB_RING_LOCKED_ALLOCATOR memCRTGet()
-#   endif
-#  endif
-
-#  if defined(OS_LINUX)
-
-typedef struct Ring_Locked_Header {
-    sem_t fill_count; // How many are filled?
-    sem_t empty_count; // How many are empty?
-    pthread_mutex_t buffer_lock;
-    Size buffer_size;
-    Size buffer_write_cursor;
-    Size buffer_read_cursor;
-    Size allocation_size;
-    Byte _pad[8];
-    alignas(alignof(max_align_t)) Byte buffer[];
-} Ring_Locked_Header;
-
-#   define ringLockedCreate(type, size) ringLocked_Create(sizeof(type), size)
-
-header_function
-void* ringLocked_Create (Size elemsize, Size buffersize)
-{
-    Size ring_size = elemsize * buffersize;
-    Size header_size = memAlignUp(sizeof(Ring_Locked_Header));
-    Size total_size = header_size + ring_size;
-
-    Ring_Locked_Header *head = memAlloc(NLIB_RING_LOCKED_ALLOCATOR, total_size);
-    *head = (Ring_Locked_Header)NLIB_ZERO_INIT_LIST;
-
-    head->allocation_size = total_size;
-
-    sem_init(&head->fill_count, 0, 0);
-    sem_init(&head->empty_count, 0, (Uint)buffersize);
-    pthread_mutex_init(&head->buffer_lock, NULL);
-
-    head->buffer_size = buffersize;
-
-    void *result = (Byte*)(void*)head + header_size;
-    return result;
-}
-
-#   define ringLocked_GetHead(r) containerof(r, Ring_Locked_Header, buffer)
-
-#   define ringLockedPush(ring, elem) do {                      \
-        Ring_Locked_Header *head = ringLocked_GetHead(ring);    \
-                                                                \
-        sem_wait(&head->empty_count);                           \
-        pthread_mutex_lock(&head->buffer_lock);                 \
-                                                                \
-        ring[head->buffer_write_cursor] = elem;                 \
-        head->buffer_write_cursor++;                            \
-        head->buffer_write_cursor %= head->buffer_size;         \
-                                                                \
-        pthread_mutex_unlock(&head->buffer_lock);               \
-        sem_post(&head->fill_count);                            \
-    } while (0)
-
-#   define ringLockedPull(ring, dest) do {                              \
-        Ring_Locked_Header *head = ringLocked_GetHead(ring);            \
-                                                                        \
-        sem_wait(&head->fill_count);                                    \
-        pthread_mutex_lock(&head->buffer_lock);                         \
-                                                                        \
-        memcpy(dest, ring + head->buffer_read_cursor, sizeof(*ring));   \
-        head->buffer_read_cursor++;                                     \
-        head->buffer_read_cursor %= head->buffer_size;                  \
-                                                                        \
-        pthread_mutex_unlock(&head->buffer_lock);                       \
-        sem_post(&head->empty_count);                                   \
-    } while (0)
-
-// FIXME(naman): Can this function be called if some threads are stuck inside Pull?
-header_function
-void ringLockedDelete (void *ring)
-{
-    Ring_Locked_Header *head = ringLocked_GetHead(ring);
-    memDealloc(NLIB_RING_LOCKED_ALLOCATOR, head, head->allocation_size);
-}
-
-#  elif defined(OS_WINDOWS)
-// TODO(naman): This
-#  endif
-# endif // LANG_C
-
-
-/* ==============
- * Concurrent Queue (Lock-based Unbounded Multi-producer Multi-consumer)
- */
-
-# if defined(LANG_C) && !defined(NLIB_EXCLUDE_QUEUE_LOCKED)
-
-#  if !defined(NLIB_QUEUE_LOCKED_ALLOCATOR)
-#   if defined(NLIB_ALLOCATOR)
-#    define NLIB_QUEUE_LOCKED_ALLOCATOR NLIB_ALLOCATOR
-#   elif defined(NLIB_NOLIBC)
-#    error "nlib: Queue_Locked: NLIB_QUEUE_LOCKED_ALLOCATOR required with nolibc"
-#   else
-#    define NLIB_QUEUE_LOCKED_ALLOCATOR memCRTGet()
-#   endif
-#  endif
-
-#  if defined(OS_LINUX)
-
-typedef List_Node Queue_Locked_Entry;
-
-typedef struct Queue_Locked_Head_Node_ {
-    pthread_mutex_t list_lock;
-    pthread_cond_t  list_filled_signal;
-    Queue_Locked_Entry list;
-} Queue_Locked_Head_Node_;
-
-header_function
-Queue_Locked_Entry* queueLockedCreate (void)
-{
-    Queue_Locked_Head_Node_ *qh = memAlloc(NLIB_QUEUE_LOCKED_ALLOCATOR, sizeof(*qh));
-    *qh = (Queue_Locked_Head_Node_)NLIB_ZERO_INIT_LIST;
-    Queue_Locked_Entry *qe = &qh->list;
-    listNodeInit(qe);
-
-    pthread_mutex_init(&qh->list_lock,          NULL);
-    pthread_cond_init (&qh->list_filled_signal, NULL);
-
-    return qe;
-}
-
-#   define queueLocked_GetHead(q) containerof(q, Queue_Locked_Head_Node_, list)
-
-// NOTE(naman): When a thread in pthread_cond_wait is cancelled, it is first
-// brought out of the wait, meaning that it first regains the mutex. This
-// cleanup function will make sure that in case of cancellation, the
-// thread will unlock the mutex so that no other thread waiting on the
-// same condition variable will deadlock.
-header_function
-void queueLocked_CondWaitCleaner (void *arg)
-{
-    pthread_mutex_unlock(arg);
-}
-
-#   define queueLockedEnqueue(queue, qiptr) do {                        \
-        Queue_Locked_Head_Node_ *head = queueLocked_GetHead(queue);     \
-                                                                        \
-        pthread_mutex_lock(&head->list_lock);                           \
-                                                                        \
-        listAddBefore(qiptr, &head->list);                              \
-                                                                        \
-        pthread_cond_broadcast(&head->list_filled_signal);              \
-        pthread_mutex_unlock(&head->list_lock);                         \
-    } while (0)
-
-#   define queueLockedDequeue(queue, qiptr) do {                        \
-        Queue_Locked_Head_Node_ *head = queueLocked_GetHead(queue);     \
-                                                                        \
-        pthread_mutex_lock(&head->list_lock);                           \
-                                                                        \
-        while (listIsEmpty(&head->list)) {                              \
-            pthread_cleanup_push(&queueLocked_CondWaitCleaner,          \
-                                 &head->list_lock);                     \
-            pthread_cond_wait(&head->list_filled_signal,                \
-                              &head->list_lock);                        \
-            pthread_cleanup_pop(0);                                     \
-        }                                                               \
-                                                                        \
-        Queue_Locked_Entry *que = head->list.next;                      \
-        listRemoveAndInit(que);                                         \
-        qiptr = que;                                                    \
-                                                                        \
-        pthread_mutex_unlock(&head->list_lock);                         \
-    } while (0)
-
-// FIXME(naman): Can this function be called if some threads are stuck inside Pull?
-header_function
-void queueLockedDelete (void *queue)
-{
-    Queue_Locked_Head_Node_ *head = queueLocked_GetHead(queue);
-    memDealloc(NLIB_QUEUE_LOCKED_ALLOCATOR, head, sizeof(*head));
-}
-
-#  elif defined(OS_WINDOWS)
-// TODO(naman): This
-#  endif
-# endif // LANG_C
 
 #define NLIB_H_INCLUDE_GUARD
 #endif // NLIB_H_INCLUDE_GUARD

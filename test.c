@@ -19,8 +19,5 @@ Sint main (Sint argc, Char *argv[])
     htUnitTest();
     internUnitTest();
     mapUnitTest();
-    printUnitTest();
-    ringLockedUnitTest();
-    queueLockedUnitTest();
     return 0;
 }
